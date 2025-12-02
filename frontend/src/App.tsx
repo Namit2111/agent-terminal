@@ -57,8 +57,21 @@ function App() {
 
       if (data.proposal) {
         if (data.proposal.severity === 'low') {
+          // For low severity commands, show the message first, then execute
+          agentMsg.isApprovalRequest = false
+          setMessages(prev => [...prev, agentMsg])
+          setLoading(false)
+
+          // Execute command after showing the message
           const output = await executeCommand(data.proposal.command)
-          agentMsg.executionResult = output
+
+          // Update the message with execution result
+          setMessages(prev => {
+            const newMsgs = [...prev]
+            newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], executionResult: output }
+            return newMsgs
+          })
+          return // Early return since we already handled loading state
         } else {
           agentMsg.isApprovalRequest = true
         }
@@ -96,27 +109,27 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-background text-text font-sans selection:bg-primary/30">
       {/* Header */}
-      <header className="px-6 py-4 bg-panel/50 backdrop-blur-md border-b border-gray-800 flex items-center justify-between sticky top-0 z-10">
+      <header className="px-6 py-4 bg-panel border-b border-gray-800/50 flex items-center justify-between sticky top-0 z-10 shadow-md">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-primary/10 rounded-lg border border-primary/20 shadow-[0_0_15px_rgba(61,155,255,0.1)]">
+          <div className="p-2 bg-primary/10 rounded-sm border border-primary/20 shadow-[0_0_10px_rgba(61,155,255,0.1)]">
             <Activity className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-wide text-gray-100">PC DOCTOR <span className="text-primary">AGENT</span></h1>
+            <h1 className="text-lg font-bold tracking-wide text-gray-100 font-mono">SYSTEM <span className="text-primary">DIAGNOSTICS</span></h1>
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              <span className="text-xs text-gray-400 font-mono">SYSTEM ONLINE</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+              <span className="text-[10px] text-primary/70 font-mono tracking-wider">ONLINE</span>
             </div>
           </div>
         </div>
-        <div className="flex gap-4 text-xs font-mono text-gray-500">
-          <div className="flex items-center gap-1.5">
-            <Wifi className="w-3 h-3" />
-            <span>NET: CONNECTED</span>
+        <div className="flex gap-6 text-[10px] font-mono text-gray-500">
+          <div className="flex items-center gap-2">
+            <Wifi className="w-3 h-3 text-gray-600" />
+            <span>NET: <span className="text-primary">CONNECTED</span></span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Cpu className="w-3 h-3" />
-            <span>CPU: OPTIMAL</span>
+          <div className="flex items-center gap-2">
+            <Cpu className="w-3 h-3 text-gray-600" />
+            <span>CPU: <span className="text-primary">OPTIMAL</span></span>
           </div>
         </div>
       </header>
@@ -142,30 +155,31 @@ function App() {
       </div>
 
       {/* Input Area */}
-      <div className="p-6 bg-background/80 backdrop-blur-sm border-t border-gray-800">
-        <div className="max-w-4xl mx-auto relative">
+      <div className="p-6 bg-background border-t border-gray-800/50">
+        <div className="max-w-4xl mx-auto relative group">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/20 to-primary/10 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="Describe your PC issue..."
-            className="w-full bg-panel border border-gray-700 rounded-xl pl-5 pr-32 py-4 text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all shadow-lg placeholder-gray-600"
+            placeholder="Enter diagnostic command or query..."
+            className="relative w-full bg-panel border border-gray-700/50 rounded-xl pl-5 pr-32 py-4 text-text font-mono text-sm focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all shadow-lg placeholder-gray-600"
             disabled={loading}
           />
           <div className="absolute right-2 top-2 bottom-2">
             <button
               onClick={sendMessage}
               disabled={loading || !input.trim()}
-              className="h-full px-6 bg-primary hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg font-medium transition-all flex items-center gap-2 shadow-lg shadow-blue-900/20"
+              className="h-full px-6 bg-primary hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-600 text-white rounded-lg font-medium transition-all flex items-center gap-2 shadow-lg shadow-blue-900/20"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              <span>Send</span>
+              <span className="font-mono text-xs">EXECUTE</span>
             </button>
           </div>
         </div>
-        <div className="text-center mt-2 text-[10px] text-gray-600 font-mono">
-          AI AGENT v1.0 • SECURE CONNECTION • SYSTEM ACCESS GRANTED
+        <div className="text-center mt-3 text-[10px] text-gray-600 font-mono tracking-widest">
+          TERMINAL RUN v2.0 • SECURE SHELL • ROOT ACCESS
         </div>
       </div>
     </div>

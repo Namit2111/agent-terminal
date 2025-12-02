@@ -15,6 +15,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ['Inter', 'SF Pro Text', 'IBM Plex Sans', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
       },
     },
   },

@@ -73,6 +73,10 @@ def process_user_message(message: str, session_id: Optional[str] = None) -> Agen
     # Get or create session
     session = get_or_create_session(session_id)
     
+    # RESET iteration count for new user query
+    session.iteration_count = 0
+    session.status = "active"
+    
     # Check iteration limit
     if not session.should_continue():
         return AgentResponse(

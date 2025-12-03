@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { exec } from "child_process";
+import { spawn } from "child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -39,14 +39,65 @@ app.on("activate", () => {
   }
 });
 app.whenReady().then(() => {
-  ipcMain.handle("execute-command", async (_, command) => {
+  ipcMain.handle("execute-command", async (event, command, timeout = 30) => {
     return new Promise((resolve) => {
-      exec(command, { shell: "powershell.exe" }, (error, stdout, stderr) => {
-        if (error) {
-          resolve({ success: false, output: stderr || error.message });
+      var _a, _b;
+      let output = "";
+      let errorOutput = "";
+      let timedOut = false;
+      const child = spawn("powershell.exe", ["-Command", command], {
+        shell: false,
+        windowsHide: true
+      });
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        resolve({
+          success: false,
+          output: output || "",
+          error: `Command timed out after ${timeout} seconds`,
+          timedOut: true
+        });
+      }, timeout * 1e3);
+      (_a = child.stdout) == null ? void 0 : _a.on("data", (data) => {
+        const chunk = data.toString();
+        output += chunk;
+        event.sender.send("command-output", { chunk, completed: false });
+      });
+      (_b = child.stderr) == null ? void 0 : _b.on("data", (data) => {
+        const chunk = data.toString();
+        errorOutput += chunk;
+        event.sender.send("command-output", { chunk, completed: false, error: true });
+      });
+      child.on("close", (code) => {
+        clearTimeout(timeoutId);
+        if (timedOut) return;
+        event.sender.send("command-output", { chunk: "", completed: true });
+        if (code !== 0) {
+          resolve({
+            success: false,
+            output: output || "",
+            error: errorOutput || `Command exited with code ${code}`,
+            timedOut: false
+          });
         } else {
-          resolve({ success: true, output: stdout });
+          resolve({
+            success: true,
+            output: output || "",
+            error: errorOutput || null,
+            timedOut: false
+          });
         }
+      });
+      child.on("error", (err) => {
+        clearTimeout(timeoutId);
+        event.sender.send("command-output", { chunk: "", completed: true });
+        resolve({
+          success: false,
+          output: output || "",
+          error: err.message,
+          timedOut: false
+        });
       });
     });
   });

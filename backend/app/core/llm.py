@@ -9,6 +9,7 @@ class CommandProposal(BaseModel):
     command: str
     severity: Literal["low", "high"]
     reason: str
+    timeout: int = 30  # Timeout in seconds, default 30s
 
 class AgentIterationResponse(BaseModel):
     message: str
@@ -36,6 +37,13 @@ Your role:
 Command Severity Guidelines:
 - "low": Read-only diagnostic commands (ipconfig, systeminfo, Get-Process, ping, tracert, netstat, Test-Connection, Get-NetAdapter, speedtest-cli if installed, etc.)
 - "high": Commands that modify system state (install, delete, stop services, modify registry, remove files, etc.)
+
+Command Timeout Guidelines:
+- Default: 30 seconds (for most commands like ipconfig, Get-Process, systeminfo)
+- Fast commands: 10-15 seconds (ping, simple queries)
+- Slow commands: 60-90 seconds (tracert, speedtest, large file operations)
+- Very slow commands: 120 seconds (system scans, network diagnostics)
+IMPORTANT: Always specify a timeout. No command should run indefinitely.
 
 Loop Status Guidelines:
 - "continue": You have a follow-up command to run based on the latest results. Use this when:

@@ -27,10 +27,35 @@ function App() {
 
   useEffect(scrollToBottom, [messages])
 
-  const executeCommand = async (command: string) => {
+  useEffect(() => {
+    // Listen for command output streaming
+    // @ts-ignore
+    const removeListener = window.ipcRenderer.on('command-output', (event, data) => {
+      const { chunk } = data
+
+      setMessages(prev => {
+        const newMsgs = [...prev]
+        const lastMsg = newMsgs[newMsgs.length - 1]
+
+        if (lastMsg && lastMsg.isExecuting) {
+          newMsgs[newMsgs.length - 1] = {
+            ...lastMsg,
+            streamingOutput: (lastMsg.streamingOutput || '') + chunk
+          }
+        }
+        return newMsgs
+      })
+    })
+
+    return () => {
+      (removeListener as unknown as Function)()
+    }
+  }, [])
+
+  const executeCommand = async (command: string, timeout: number = 30) => {
     try {
       // @ts-ignore
-      const result = await window.ipcRenderer.invoke('execute-command', command)
+      const result = await window.ipcRenderer.invoke('execute-command', command, timeout)
       return { output: result.output, error: result.error || null }
     } catch (error) {
       return { output: '', error: `Error: ${error}` }
@@ -77,7 +102,9 @@ function App() {
         proposal: currentResponse.proposal,
         iteration: currentResponse.iteration_count,
         loopStatus: currentResponse.loop_status,
-        isApprovalRequest: currentResponse.proposal.severity === 'high'
+        isApprovalRequest: currentResponse.proposal.severity === 'high',
+        isExecuting: false,
+        streamingOutput: ''
       }
 
       setMessages(prev => [...prev, agentMsg])
@@ -89,14 +116,22 @@ function App() {
         return // Stop autonomous loop, wait for user approval
       }
 
+      // Set executing state
+      setMessages(prev => {
+        const newMsgs = [...prev]
+        newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], isExecuting: true }
+        return newMsgs
+      })
+
       // Execute command for low severity
-      const result = await executeCommand(currentResponse.proposal.command)
+      const result = await executeCommand(currentResponse.proposal.command, currentResponse.proposal.timeout)
 
       // Update message with execution result
       setMessages(prev => {
         const newMsgs = [...prev]
         newMsgs[newMsgs.length - 1] = {
           ...newMsgs[newMsgs.length - 1],
+          isExecuting: false,
           executionResult: result.error ? `ERROR: ${result.error}\n${result.output}` : result.output
         }
         return newMsgs
@@ -105,6 +140,9 @@ function App() {
       // Wait a bit for UI to update
       await new Promise(resolve => setTimeout(resolve, 500))
 
+      // Show loading indicator for next iteration
+      setMessages(prev => [...prev, { sender: 'agent', text: '', isLoading: true }])
+
       // Send results back to backend for next iteration (include error if present)
       const nextResponse = await sendIterationToBackend(
         session,
@@ -112,6 +150,9 @@ function App() {
         result.output,
         result.error || undefined
       )
+
+      // Remove loading indicator
+      setMessages(prev => prev.filter(msg => !msg.isLoading))
 
       if (!nextResponse) {
         setLoading(false)
@@ -181,7 +222,15 @@ function App() {
     if (!msg.proposal) return
 
     setLoading(true)
-    const result = await executeCommand(msg.proposal.command)
+
+    // Set executing state
+    setMessages(prev => {
+      const newMsgs = [...prev]
+      newMsgs[index] = { ...newMsgs[index], isExecuting: true, streamingOutput: '' }
+      return newMsgs
+    })
+
+    const result = await executeCommand(msg.proposal.command, msg.proposal.timeout)
 
     // Update message with execution result
     setMessages(prev => {
@@ -189,6 +238,7 @@ function App() {
       newMsgs[index] = {
         ...msg,
         isApprovalRequest: false,
+        isExecuting: false,
         executionResult: result.error ? `ERROR: ${result.error}\n${result.output}` : result.output
       }
       return newMsgs

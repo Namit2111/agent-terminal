@@ -1,4 +1,4 @@
-import { User, Bot } from 'lucide-react'
+import { User, Bot, Terminal, Loader2 } from 'lucide-react'
 import { ChatMessage as ChatMessageType } from '../types'
 import { CommandProposalCard } from './CommandProposalCard'
 
@@ -23,12 +23,23 @@ export function ChatBubble({ message, onApprove, onReject }: ChatBubbleProps) {
 
             {/* Message Bubble */}
             <div className={`max-w-2xl flex flex-col gap-2 ${isUser ? 'items-end' : 'items-start'}`}>
-                <div className={`px-5 py-3.5 rounded-xl shadow-sm leading-relaxed text-sm ${isUser
-                    ? 'bg-primary text-white rounded-tr-none'
-                    : 'bg-panel border border-gray-700/50 text-text rounded-tl-none'
-                    }`}>
-                    {message.text}
-                </div>
+                {/* Loading Indicator */}
+                {message.isLoading && (
+                    <div className="flex items-center gap-2 px-5 py-3.5 rounded-xl bg-panel border border-gray-700/50 text-text rounded-tl-none animate-pulse">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                        <span className="text-sm font-mono text-gray-400">Analyzing...</span>
+                    </div>
+                )}
+
+                {/* Main Message */}
+                {!message.isLoading && message.text && (
+                    <div className={`px-5 py-3.5 rounded-xl shadow-sm leading-relaxed text-sm ${isUser
+                        ? 'bg-primary text-white rounded-tr-none'
+                        : 'bg-panel border border-gray-700/50 text-text rounded-tl-none'
+                        }`}>
+                        {message.text}
+                    </div>
+                )}
 
                 {/* Command Proposal Card */}
                 {message.proposal && (
@@ -36,6 +47,8 @@ export function ChatBubble({ message, onApprove, onReject }: ChatBubbleProps) {
                         proposal={message.proposal}
                         isApprovalRequest={message.isApprovalRequest}
                         executionResult={message.executionResult}
+                        isExecuting={message.isExecuting}
+                        streamingOutput={message.streamingOutput}
                         onApprove={onApprove}
                         onReject={onReject}
                     />

@@ -5,16 +5,20 @@ import {
   Wifi,
   Activity,
   Send,
-  Loader2
+  Loader2,
+  RotateCw
 } from 'lucide-react'
 import './App.css'
-import { ChatMessage, AgentResponse } from './types'
+import { ChatMessage, AgentResponse, LoopStatus } from './types'
 import { ChatBubble } from './components/ChatBubble'
 
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [loopStatus, setLoopStatus] = useState<LoopStatus>('idle')
+  const [iterationCount, setIterationCount] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -27,10 +31,114 @@ function App() {
     try {
       // @ts-ignore
       const result = await window.ipcRenderer.invoke('execute-command', command)
-      return result.output
+      return { output: result.output, error: result.error || null }
     } catch (error) {
-      return `Error: ${error}`
+      return { output: '', error: `Error: ${error}` }
     }
+  }
+
+  const sendIterationToBackend = async (session: string, command: string, output: string, error?: string) => {
+    if (!session) {
+      console.error('No session ID available')
+      return null
+    }
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/iterate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session,
+          command,
+          output,
+          error
+        })
+      })
+      const data: AgentResponse = await res.json()
+      return data
+    } catch (error) {
+      console.error('Iteration error:', error)
+      return null
+    }
+  }
+
+  const handleAutonomousLoop = async (initialResponse: AgentResponse, session: string) => {
+    let currentResponse = initialResponse
+
+    while (currentResponse.loop_status === 'continue' && currentResponse.proposal) {
+      // Update iteration count
+      setIterationCount(currentResponse.iteration_count)
+      setLoopStatus('continue')
+
+      // Add agent message
+      const agentMsg: ChatMessage = {
+        sender: 'agent',
+        text: currentResponse.message,
+        proposal: currentResponse.proposal,
+        iteration: currentResponse.iteration_count,
+        loopStatus: currentResponse.loop_status,
+        isApprovalRequest: currentResponse.proposal.severity === 'high'
+      }
+
+      setMessages(prev => [...prev, agentMsg])
+
+      // If high severity, wait for user approval
+      if (currentResponse.proposal.severity === 'high') {
+        setLoading(false)
+        setLoopStatus('blocked')
+        return // Stop autonomous loop, wait for user approval
+      }
+
+      // Execute command for low severity
+      const result = await executeCommand(currentResponse.proposal.command)
+
+      // Update message with execution result
+      setMessages(prev => {
+        const newMsgs = [...prev]
+        newMsgs[newMsgs.length - 1] = {
+          ...newMsgs[newMsgs.length - 1],
+          executionResult: result.error ? `ERROR: ${result.error}\n${result.output}` : result.output
+        }
+        return newMsgs
+      })
+
+      // Wait a bit for UI to update
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // Send results back to backend for next iteration (include error if present)
+      const nextResponse = await sendIterationToBackend(
+        session,
+        currentResponse.proposal.command,
+        result.output,
+        result.error || undefined
+      )
+
+      if (!nextResponse) {
+        setLoading(false)
+        setLoopStatus('blocked')
+        setMessages(prev => [...prev, { sender: 'agent', text: 'Error communicating with backend.', loopStatus: 'blocked' }])
+        return
+      }
+
+      currentResponse = nextResponse
+    }
+
+    // Final message if loop ended
+    if (currentResponse.message) {
+      const finalMsg: ChatMessage = {
+        sender: 'agent',
+        text: currentResponse.message,
+        proposal: currentResponse.proposal,
+        iteration: currentResponse.iteration_count,
+        loopStatus: currentResponse.loop_status,
+        isApprovalRequest: currentResponse.proposal?.severity === 'high'
+      }
+      setMessages(prev => [...prev, finalMsg])
+    }
+
+    setLoopStatus(currentResponse.loop_status)
+    setIterationCount(currentResponse.iteration_count)
+    setLoading(false)
   }
 
   const sendMessage = async () => {
@@ -40,48 +148,31 @@ function App() {
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setLoading(true)
+    setLoopStatus('continue')
 
     try {
       const res = await fetch('http://127.0.0.1:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg.text })
+        body: JSON.stringify({
+          message: userMsg.text,
+          session_id: sessionId
+        })
       })
       const data: AgentResponse = await res.json()
 
-      const agentMsg: ChatMessage = {
-        sender: 'agent',
-        text: data.message,
-        proposal: data.proposal
+      // Store session ID
+      if (data.session_id) {
+        setSessionId(data.session_id)
       }
 
-      if (data.proposal) {
-        if (data.proposal.severity === 'low') {
-          // For low severity commands, show the message first, then execute
-          agentMsg.isApprovalRequest = false
-          setMessages(prev => [...prev, agentMsg])
-          setLoading(false)
+      // Start autonomous loop (pass session_id from response)
+      await handleAutonomousLoop(data, data.session_id || '')
 
-          // Execute command after showing the message
-          const output = await executeCommand(data.proposal.command)
-
-          // Update the message with execution result
-          setMessages(prev => {
-            const newMsgs = [...prev]
-            newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], executionResult: output }
-            return newMsgs
-          })
-          return // Early return since we already handled loading state
-        } else {
-          agentMsg.isApprovalRequest = true
-        }
-      }
-
-      setMessages(prev => [...prev, agentMsg])
     } catch (error) {
-      setMessages(prev => [...prev, { sender: 'agent', text: 'Error connecting to backend.' }])
-    } finally {
+      setMessages(prev => [...prev, { sender: 'agent', text: 'Error connecting to backend.', loopStatus: 'blocked' }])
       setLoading(false)
+      setLoopStatus('blocked')
     }
   }
 
@@ -89,13 +180,39 @@ function App() {
     const msg = messages[index]
     if (!msg.proposal) return
 
-    const output = await executeCommand(msg.proposal.command)
+    setLoading(true)
+    const result = await executeCommand(msg.proposal.command)
 
+    // Update message with execution result
     setMessages(prev => {
       const newMsgs = [...prev]
-      newMsgs[index] = { ...msg, isApprovalRequest: false, executionResult: output }
+      newMsgs[index] = {
+        ...msg,
+        isApprovalRequest: false,
+        executionResult: result.error ? `ERROR: ${result.error}\n${result.output}` : result.output
+      }
       return newMsgs
     })
+
+    // Continue autonomous loop after approval
+    try {
+      const nextResponse = await sendIterationToBackend(
+        sessionId || '',
+        msg.proposal.command,
+        result.output,
+        result.error || undefined
+      )
+
+      if (nextResponse) {
+        await handleAutonomousLoop(nextResponse, sessionId || '')
+      } else {
+        setLoading(false)
+        setLoopStatus('blocked')
+      }
+    } catch (error) {
+      setLoading(false)
+      setLoopStatus('blocked')
+    }
   }
 
   const handleReject = (index: number) => {
@@ -104,6 +221,7 @@ function App() {
       newMsgs[index] = { ...newMsgs[index], isApprovalRequest: false }
       return newMsgs
     })
+    setLoopStatus('blocked')
   }
 
   return (
@@ -118,11 +236,19 @@ function App() {
             <h1 className="text-lg font-bold tracking-wide text-gray-100 font-mono">SYSTEM <span className="text-primary">DIAGNOSTICS</span></h1>
             <div className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
-              <span className="text-[10px] text-primary/70 font-mono tracking-wider">ONLINE</span>
+              <span className="text-[10px] text-primary/70 font-mono tracking-wider">
+                {loopStatus === 'continue' ? 'PROCESSING' : loopStatus === 'done' ? 'COMPLETE' : loopStatus === 'blocked' ? 'WAITING' : 'ONLINE'}
+              </span>
             </div>
           </div>
         </div>
         <div className="flex gap-6 text-[10px] font-mono text-gray-500">
+          {loopStatus === 'continue' && (
+            <div className="flex items-center gap-2">
+              <RotateCw className="w-3 h-3 text-primary animate-spin" />
+              <span>ITERATION: <span className="text-primary">{iterationCount}</span></span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Wifi className="w-3 h-3 text-gray-600" />
             <span>NET: <span className="text-primary">CONNECTED</span></span>
@@ -140,6 +266,7 @@ function App() {
           <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-50">
             <Terminal className="w-16 h-16 mb-4 text-gray-700" />
             <p className="text-sm font-mono">AWAITING INPUT...</p>
+            <p className="text-xs font-mono mt-2 text-gray-600">Powered by Gemini LLM</p>
           </div>
         )}
 
@@ -179,7 +306,7 @@ function App() {
           </div>
         </div>
         <div className="text-center mt-3 text-[10px] text-gray-600 font-mono tracking-widest">
-          TERMINAL RUN v2.0 • SECURE SHELL • ROOT ACCESS
+          TERMINAL RUN v2.0 • GEMINI POWERED • AUTONOMOUS MODE
         </div>
       </div>
     </div>

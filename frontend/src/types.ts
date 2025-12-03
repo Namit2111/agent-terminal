@@ -4,9 +4,15 @@ export interface CommandProposal {
     reason: string
 }
 
+export type LoopStatus = 'idle' | 'continue' | 'blocked' | 'done'
+
 export interface AgentResponse {
     message: string
     proposal?: CommandProposal
+    session_id?: string
+    loop_status: LoopStatus
+    iteration_count: number
+    blocker_reason?: string
 }
 
 export interface ChatMessage {
@@ -15,4 +21,6 @@ export interface ChatMessage {
     proposal?: CommandProposal
     isApprovalRequest?: boolean
     executionResult?: string
+    iteration?: number
+    loopStatus?: LoopStatus
 }
